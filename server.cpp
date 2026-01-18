@@ -1,49 +1,72 @@
-#include <iostream>
-#include <cstring>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
+#include <fcntl.h>
+#include <cerrno>
+#include <string>
+#include <cstring>
+#include <vector>
+#include <algorithm>
+#include <iostream>
+
+#define PORT 5000
+
+
+int sockopt = 1;
+fd_set fr, fw, fe;
+std::vector<int> fds;
+
+void setNBIO(){
+
+}
+
 
 int main(){
 
-    // create socket
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    int server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
     if(server_fd < 0){
-        std::cerr << "Socket creation failed\n";
+        perror("socket");
         return 1;
     }
 
-    // Define server address
     sockaddr_in server_addr;
     std::memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(8000);
+
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &sockopt, sizeof(sockopt));
 
     if(bind(server_fd, (sockaddr*)& server_addr, sizeof(server_addr)) < 0){
-        std::cerr << "Bind failed\n";
+        perror("bind");
         return 1;
     }
 
-    if(listen(server_fd, 5) < 0){
-        std::cerr << "Listen failed\n";
+    if(listen(server_fd, 10) < 0){
+        perror("listen");
         return 1;
     }
 
-    std::cout << "Server listening on port 8000 ... \n";
+    std::cout << "Server listening at port " << PORT << std::endl;
 
+    while(1){
+        FD_ZERO(&fr);
+        FD_ZERO(&fw);
 
-    sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    int client_fd = accept(server_fd, (sockaddr*)& client_addr, &client_len);
-    if(client_fd < 0){
-        std::cerr << "Accept failed\n";
-        return 1;
+        FD_SET(server_fd, &fr);
+        FD_SET(server_fd, &fw);
+
+        int max_fd = server_fd;
+        for(int fd: fds){
+            FD_SET(fd, &fr);
+            FD_SET(fd, &fw);
+
+            max_fd = max(max_fd, fd);
+        }
+
+        select(max_fd + 1, &fr, &fw, nullptr, nullptr);
+
+        acceptRequests(server_fd);
     }
-
-    std::cout << "Client connected\n";
-    
-    close(client_fd);
-    close(client_fd);
-
-    return 0;
 }
