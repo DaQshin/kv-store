@@ -26,11 +26,14 @@ const size_t k_max_msg = 4096;
 static int32_t read_full(int fd, char* buffer, size_t n){
     while(n){
         ssize_t rv = read(fd, buffer, n);
-        if(rv <= 0) return -1;
 
-        assert((size_t)rv <= n);
-        n -= (size_t)rv;
-        buffer += rv;
+        if(rv > 0 && rv <= n){
+            n -= (size_t)rv;
+            buffer += rv;
+        }
+        else if(rv == 0) return EOF;
+        else if(errno == EINTR) continue;
+        else return -1;
     }
 
     return 0;
@@ -39,62 +42,63 @@ static int32_t read_full(int fd, char* buffer, size_t n){
 static int32_t write_all(int fd, const char* buffer, size_t n){
     while(n){
         ssize_t rv = write(fd, buffer, n);
-        if(rv <= 0) return -1;
-
-        assert((size_t)rv <= n);
-        n -= (size_t)rv;
-        buffer += rv;
+        if(rv > 0 && rv <= n){
+            n -= (size_t)rv;
+            buffer += rv;
+        }
+        else if(rv == -1 || errno == EINTR) continue;
+        else return -1;
     }
 
     return 0;
 }
 
 static int32_t one_request(int connfd){
-    char read_buffer[4 + k_max_msg];
+    char rbuf[4 + k_max_msg];
     errno = 0;
-    int32_t err = read_full(connfd, read_buffer, 4);
+    int32_t err = read_full(connfd, rbuf, sizeof(rbuf) - 1);
     if(err){
-        msg(errno == 0 ? "EOF" : "read() error");
+        msg(err == 0 ? "EOF" : "read() error");
         return err;
     }
 
-    uint32_t len = 0;
-    memcpy(&len, read_buffer, 4);
+    int32_t len = 0;
+    memcpy(&len, rbuf, 4);
     if(len > k_max_msg){
-        msg("message length too long");
+        msg("message too long");
         return -1;
     }
 
-    err = read_full(connfd, &read_buffer[4], len);
+    err = read_full(connfd, &rbuf[4], len);
     if(err){
         msg("read() error");
         return err;
     }
 
-    fprintf(stderr, "Client: %.*s\n", len, &read_buffer[4]);
+    printf("Client: %.*s", len, &rbuf[4]);
 
-    const char reply[] = "what is happening";
-    char write_buffer[4 + sizeof(reply)];
-    len = (uint32_t)strlen(reply);
-    memcpy(write_buffer, &len, 4);
-    memcpy(&write_buffer[4], reply, len);
+    const char reply[] = "hello client";
+    char wbuf[4 + sizeof(reply)];
+    len = (int32_t)strlen(reply);
+    memcpy(wbuf, &len, 4);
+    memcpy(&wbuf, reply, len);
 
-    int32_t rv = write_all(connfd, write_buffer, 4 + len);
+    int32_t rv = write_all(connfd, wbuf, 4 + len);
 
     return rv;
 }
 
-// static void rwtoclient(int connfd, const char* write_buffer){
-//     char read_buffer[64];
-//     ssize_t n = read(connfd, read_buffer, sizeof(read_buffer) - 1);
+// static void rwtoclient(int connfd, const char* wbuf){
+//     char rbuf[64];
+//     ssize_t n = read(connfd, rbuf, sizeof(rbuf) - 1);
 //     if(n < 0){
 //         msg("read() error");
 //         return;
 //     }
 
-//     fprintf(stderr, "Client: %s\n", read_buffer);
+//     fprintf(stderr, "Client: %s\n", rbuf);
 
-//     write(connfd, write_buffer, sizeof(write_buffer) - 1);
+//     write(connfd, wbuf, sizeof(wbuf) - 1);
 // }
 
 int main(){
