@@ -92,15 +92,12 @@ static void buf_consume(std::vector<uint8_t> &buf, size_t n){
 }
 
 static Conn* handle_accept(int fd){
-    sockaddr_in client_addr;
+    struct sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
-    int connfd = accept(fd, (sockaddr *)& client_addr, &addrlen);
+    int connfd = accept(fd, (struct sockaddr*) &client_addr, &addrlen);
     if(connfd < 0){
-        die("accept()");
         return nullptr;
     }
-
-    log_client_connection(client_addr);
 
     fd_set_nb(connfd);
 
@@ -110,7 +107,6 @@ static Conn* handle_accept(int fd){
     return conn;
 
 }
-
 static void handle_write(Conn* conn){
     assert(conn->outgoing.size() > 0);
     ssize_t rv = write(conn->fd, &conn->outgoing, conn->outgoing.size());
@@ -225,18 +221,7 @@ static int32_t one_request(int connfd){
     return rv;
 }
 
-// static void rwtoclient(int connfd, const char* wbuf){
-//     char rbuf[64];
-//     ssize_t n = read(connfd, rbuf, sizeof(rbuf) - 1);
-//     if(n < 0){
-//         msg("read() error");
-//         return;
-//     }
 
-//     fprintf(stderr, "Client: %s\n", rbuf);
-
-//     write(connfd, wbuf, sizeof(wbuf) - 1);
-// }
 
 int main(){
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -264,19 +249,57 @@ int main(){
 
     LOG_INFO("server starting on port %d", PORT);
 
+    std::vector<Conn*> fd2conn;
+    std::vector<pollfd> poll_args;
     while(1){
-        sockaddr_in client_addr;
-        socklen_t addrlen = sizeof(client_addr);
-        int connfd = accept(fd, (sockaddr*)& client_addr, &addrlen);
-        if(connfd < 0 ){
-            continue;
+        poll_args.clear();
+        struct pollfd srvfd = {fd, POLLIN, 0};
+        poll_args.push_back(srvfd);
+
+        for(Conn* conn: fd2conn){
+            if(!conn) continue;
+            struct pollfd clfd = {conn->fd, POLLERR, 0};
+            if(conn->want_read){
+                clfd.events |= POLLIN;
+            }
+            if(conn->want_write){
+                clfd.events |= POLLOUT;
+            }
+            poll_args.push_back(clfd);
+
         }
 
-        while(1){
-            int32_t err = one_request(connfd);
-            if(err) break;
+        int rv = poll(poll_args.data(), (nfds_t)poll_args.size(), -1);
+        if(rv < 0 && errno == EINTR){
+            continue;
         }
-        close(connfd);
+        if(rv < 0) die("poll()");
+
+        if(poll_args[0].revents){
+            if(Conn* conn = handle_accept(fd)){
+                if(fd2conn.size() <= (size_t)conn->fd){
+                    fd2conn.resize(conn->fd + 1);
+                }
+                fd2conn[conn->fd] = conn;
+            }
+        }
+
+        for(ssize_t i = 1; i < poll_args.size(); i++){
+            uint32_t ready = poll_args[i].revents;
+            Conn* conn = fd2conn{poll_args[i].fd};
+            if(ready & POLLIN){
+                handle_read(conn);
+            }
+            if(ready & POLLOUT){
+                handle_write(conn);
+            }
+
+            if((ready & POLLERR) || conn->want_close){
+                close(conn->fd);
+                fd2conn[conn->fd] = nullptr;
+                delete conn;
+            }
+        }
     }
 
     return 0;
