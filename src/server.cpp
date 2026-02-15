@@ -48,6 +48,13 @@ static void fd_set_nb(int fd){
 
 const size_t k_max_msg = 32 << 20;
 
+struct Buffer{
+    uint8_t* buffer_begin;
+    uint8_t* buffer_end;
+    uint8_t* data_begin;
+    uint8_t* data_end;
+};
+
 struct Conn {
     int fd = -1;
     bool want_read = false;
@@ -66,11 +73,11 @@ static void buf_consume(std::vector<uint8_t> &buf, size_t n){
     buf.erase(buf.begin(), buf.begin() + n);
 }
 
-static Conn* handle_accept(int fd){
-    auto now = std::chrono::system_clock::now();
-    std::time_t t = std::chrono::system_clock::to_time_t(now);
-    std::tm tm = *std::localtime(&t);
+static void buf_consume(struct Buffer* buf, size_t n){
+    buf->data_begin += n;
+}
 
+static Conn* handle_accept(int fd){
     struct sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
     int connfd = accept(fd, (struct sockaddr*) &client_addr, &addrlen);
@@ -80,13 +87,7 @@ static Conn* handle_accept(int fd){
 
     uint32_t ip = ntohl(client_addr.sin_addr.s_addr);
     uint32_t port = ntohs(client_addr.sin_port);
-    LOG_INFO("New Connection [time: %04d-%02d-%02d %02d:%02d:%02d, address: %u.%u.%u.%u:%u]\n",
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min,
-        tm.tm_sec,
+    LOG_INFO("NEW CONNECTION [address: %u.%u.%u.%u:%u]\n",
         (ip >> 24) & 0xFF,
         (ip >> 16) & 0xFF,
         (ip >> 8)  & 0xFF,
@@ -116,7 +117,9 @@ static bool try_one_request(Conn* conn){
     if(4 + len > conn->incoming.size()) return false;
 
     const uint8_t* request = &conn->incoming[4];
-    LOG_INFO("Client: {len:%d data:%.*s\n}", len, len < 100 ? len : 100, request);
+    LOG_INFO("Client: [len:%d data:%.*s\n]", len, len < 100 ? len : 100, request);
+
+    LOG_DEBUG("LENGTH( conn->outgoing ) = %d", conn->outgoing.size());
     
     buf_append(conn->outgoing, (const uint8_t*)&len, 4);
     buf_append(conn->outgoing, request, len);
@@ -144,7 +147,6 @@ static void handle_write(Conn* conn){
     if(conn->outgoing.size() == 0){
         conn->want_read = true;
         conn->want_write = false;
-
     }
 
 }
