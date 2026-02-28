@@ -63,7 +63,36 @@ struct Response{
     std::vector<uint8_t> data;
 }
 
+enum {
+    RES_OK = 0;
+    RES_NX = 1;
+    RES_ERR = 2;
+}
 
+static std::map<std::string, std::string> global_data;
+
+static void do_request(std::vector<std::string>& cmd, Response& out){
+    if(cmd.size() == 2 && cmd[0] == "GET"){
+        auto it = global_data.find(cmd[1]);
+        if(it == global_data.end()){
+            out.status = RES_NX;
+            return;
+        }
+
+        const std::string& val = it->second;
+        out.data.assign(val.begin(), val.end());        
+    }
+
+    else if(cmd.size() == 3 &&  cmd[0] == "SET"){
+        global_data[cmd[1]] = std::move(cmd[2]);
+    }
+    else if(cmd.size() == 2 && cmd[0] == "DEL"){
+        global_data.erase(cmd[1]);
+    }
+    else{
+        out.status = RES_ERR;
+    }
+}
 
 static void buf_append(std::vector<uint8_t> &buf, const uint8_t* data, size_t len){
     buf.insert(buf.end(), data, data + len); // to be optimized
@@ -74,12 +103,11 @@ static void buf_consume(std::vector<uint8_t> &buf, size_t n){
 }
 
 static void make_response(const Response& res, std::vector<uint8_t>& out){
-    uint32_t res_len = 4 + (uint32_t)res.data().size();
-    buf_append(out, (const uint8_t*)&res_len, 4);
-    buf_append(out, (const uint8_t*)& out.status, 4);
-    buf_append(out, res.data.data(), res.data().size());
+    uint32_t res_len = 4 + (uint32_t)res.data.size();
+    buf_append(out, (const uint8_t*)& res_len, 4);
+    buf_append(out, (const uint8_t*)& res.status, 4);
+    buf_append(out, res.data.data(), res.data.size());
 }
-
 
 static bool read_u32(const uint8_t* cur, const uint8_t* end, uint32_t* out){
     if(cur + 4 > end) return false;
@@ -89,12 +117,7 @@ static bool read_u32(const uint8_t* cur, const uint8_t* end, uint32_t* out){
     return true;
 }
 
-static bool read_str(
-    const uint8_t* cur, 
-    const uint8_t* end, 
-    size_t n, 
-    std::string& out
-){
+static bool read_str(const uint8_t* cur, const uint8_t* end, size_t n, std::string& out){
     if(cur + n > end) return false;
 
     out.assign(cur, cur + n);
