@@ -11,7 +11,7 @@
 #include <sys/socket.h>
 #include <netinet/ip.h>
 #include <vector>
-#include <chrono>
+#include <map>
 #include "log.cpp"
 
 #define PORT 5000
@@ -58,12 +58,69 @@ struct Conn {
     std::vector<uint8_t> outgoing;
 };
 
+struct Response{
+    uint32_t status = 0;
+    std::vector<uint8_t> data;
+}
+
+
+
 static void buf_append(std::vector<uint8_t> &buf, const uint8_t* data, size_t len){
-    buf.insert(buf.end(), data, data + len);
+    buf.insert(buf.end(), data, data + len); // to be optimized
 }
 
 static void buf_consume(std::vector<uint8_t> &buf, size_t n){
-    buf.erase(buf.begin(), buf.begin() + n);
+    buf.erase(buf.begin(), buf.begin() + n); // to be optimized 
+}
+
+static void make_response(const Response& res, std::vector<uint8_t>& out){
+    uint32_t res_len = 4 + (uint32_t)res.data().size();
+    buf_append(out, (const uint8_t*)&res_len, 4);
+    buf_append(out, (const uint8_t*)& out.status, 4);
+    buf_append(out, res.data.data(), res.data().size());
+}
+
+
+static bool read_u32(const uint8_t* cur, const uint8_t* end, uint32_t* out){
+    if(cur + 4 > end) return false;
+
+    memcpy(&out, cur, 4);
+    cur += 4;
+    return true;
+}
+
+static bool read_str(
+    const uint8_t* cur, 
+    const uint8_t* end, 
+    size_t n, 
+    std::string& out
+){
+    if(cur + n > end) return false;
+
+    out.assign(cur, cur + n);
+    cur += n;
+    return true;
+}
+
+static int32_t parse_req_v2(const uint8_t* data, size_t size, std::vector<std::string>& out){
+    const uint32_t* end = data + size;
+    uint32_t nstr = 0;
+    if(!read_u32(data, end, nstr)) return -1;
+
+    if(nstr > k_max_msg) return -1;
+
+    while(out.size() < nstr){
+        uint32_t len = 0;
+        if(!read_u32(data, end, len)) return -1;
+
+        out.push_back(std::string());
+        if(!read_str(data, end, len, out.back())) return -1;
+    }
+
+    if(data != end) return -1;
+
+    return 0;
+
 }
 
 static Conn* handle_accept(int fd){
@@ -92,7 +149,7 @@ static Conn* handle_accept(int fd){
 
 }
 
-static bool try_one_request(Conn* conn){
+static bool parse_req_v1(Conn* conn){
     if(conn->incoming.size() < 4) return false;
 
     uint32_t len = 0;
@@ -163,7 +220,7 @@ static void handle_read(Conn* conn){
 
     buf_append(conn->incoming, buf, (size_t)rv);
 
-    while(try_one_request(conn)){}
+    while(parse_req_v1(conn)){}
 
     if(conn->outgoing.size() > 0){
         conn->want_read = false;
