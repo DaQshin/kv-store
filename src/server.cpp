@@ -66,29 +66,6 @@ enum {
 
 static std::map<std::string, std::string> global_ds;
 
-static void do_request(std::vector<std::string>& cmd, Response& out){
-    if(cmd.size() == 2 && cmd[0] == "GET"){
-        auto it = global_data.find(cmd[1]);
-        if(it == global_data.end()){
-            out.status = RES_NX;
-            return;
-        }
-
-        const std::string& val = it->second;
-        out.data.assign(val.begin(), val.end());        
-    }
-
-    else if(cmd.size() == 3 &&  cmd[0] == "SET"){
-        global_data[cmd[1]] = std::move(cmd[2]);
-    }
-    else if(cmd.size() == 2 && cmd[0] == "DEL"){
-        global_data.erase(cmd[1]);
-    }
-    else{
-        out.status = RES_ERR;
-    }
-}
-
 static void buf_append(std::vector<uint8_t> &buf, const uint8_t* data, size_t len){
     buf.insert(buf.end(), data, data + len); // to be optimized
 }
@@ -116,7 +93,7 @@ static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out)
     uint32_t res_len = 4 + (uint32_t)(val.end() - val.begin());
     buf_append(out, (const uint8_t*)& res_len, 4);
     buf_append(out, (const uint8_t*)& status, 4);
-    buf_append(out, (const uint8_t*)val.data(), 4 + res_len);
+    buf_append(out, (const uint8_t*)val.data(), (size_t)(val.end() - val.begin()));
 }
 
 static bool read_u32(const uint8_t* cur, const uint8_t* end, uint32_t* out){
