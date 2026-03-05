@@ -75,20 +75,28 @@ static void buf_consume(std::vector<uint8_t> &buf, size_t n){
 }
 
 static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
-    uint8_t status = 0;
-    std::string val;
+    uint32_t status = RES_OK;
+    std::string val = "[NO REPLY]";
     if(cmd.size() == 2 && cmd[0] == "GET"){
         auto it = global_ds.find(cmd[1]);
-        if(it == global_ds.end()) status = RES_NX;
-        val = it->second;
+        if(it == global_ds.end()){
+            status = RES_NX;
+            val = "Value Not Found.";
+        }
+        else val = it->second;
     }
     else if(cmd.size() == 3 && cmd[0] == "SET"){
         global_ds[cmd[1]] = std::move(cmd[2]);
+        val = "Operation successful.";
     }
     else if(cmd.size() == 2 && cmd[0] == "DEL"){
         global_ds.erase(cmd[1]);
+        val = "Operation successful.";
     }
-    else status = RES_ERR;
+    else{
+        status = RES_ERR;
+        val = "Operation falied.";
+    }
 
     uint32_t res_len = 4 + (uint32_t)(val.end() - val.begin());
     buf_append(out, (const uint8_t*)& res_len, 4);
@@ -96,15 +104,15 @@ static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out)
     buf_append(out, (const uint8_t*)val.data(), (size_t)(val.end() - val.begin()));
 }
 
-static bool read_u32(const uint8_t* cur, const uint8_t* end, uint32_t* out){
+static bool read_u32(const uint8_t*& cur, const uint8_t*& end, uint32_t* out){
     if(cur + 4 > end) return false;
 
-    memcpy(&out, cur, 4);
+    memcpy(out, cur, 4);
     cur += 4;
     return true;
 }
 
-static bool read_str(const uint8_t* cur, const uint8_t* end, size_t n, std::string& out){
+static bool read_str(const uint8_t*& cur, const uint8_t*& end, size_t n, std::string& out){
     if(cur + n > end) return false;
 
     out.assign(cur, cur + n);
@@ -112,26 +120,57 @@ static bool read_str(const uint8_t* cur, const uint8_t* end, size_t n, std::stri
     return true;
 }
 
-static int32_t parse_req(const uint8_t* data, size_t size, std::vector<std::string>& out){
-    const uint8_t* end = data + (uint8_t)size;
+static int32_t parse_req(const uint8_t*& data, size_t size, std::vector<std::string>& out){
+    const uint8_t* end = data + size;
+
     uint32_t nstr = 0;
     if(!read_u32(data, end, &nstr)) return -1;
 
-    if(nstr > k_max_msg) return -1;
-
     while(out.size() < nstr){
         uint32_t len = 0;
-        if(!read_u32(data, end, &len)) return -1;
+        if(!read_u32(data, end, &len)) std::cout << "path" << 3 << std::endl;
 
         out.push_back(std::string());
-        if(!read_str(data, end, len, out.back())) return -1;
+        if(!read_str(data, end, len, out.back())) std::cout << "path" << 4 << std::endl;
     }
 
-    if(data != end) return -1;
+    if(data != end) std::cout << "path" << 5 << std::endl;
 
     return 0;
-
 }
+
+static bool try_one_request(Conn* conn){
+    if(conn->incoming.size() < 4) return false;
+
+    uint32_t total_len = 0;
+    memcpy(&total_len, conn->incoming.data(), 4);
+    if(total_len > k_max_msg){
+        msg("msg too long");
+        conn->want_close = true;
+        return false;
+    }
+
+    if(4 + total_len > conn->incoming.size()) return false;
+
+    const uint8_t* request = &conn->incoming[4];
+    LOG_INFO("Client: [total_len:%u data:%.*s]\n",
+         total_len,
+         (int)(total_len < 100 ? total_len : 100),
+         (char*)request);
+    
+    std::vector<std::string> cmd;
+    if(parse_req(request, total_len, cmd) < 0){
+        msg("bad request");
+        return false;
+    }
+
+    do_request(cmd, conn->outgoing);
+
+    buf_consume(conn->incoming, 4 + total_len);
+
+    return true;
+}
+
 
 static Conn* handle_accept(int fd){
     struct sockaddr_in client_addr;
@@ -159,34 +198,6 @@ static Conn* handle_accept(int fd){
 
 }
 
-static bool try_one_request(Conn* conn){
-    if(conn->incoming.size() < 4) return false;
-
-    uint32_t len = 0;
-    memcpy(&len, conn->incoming.data(), 4);
-    if(len > k_max_msg){
-        msg("msg too long");
-        conn->want_close = true;
-        return false;
-    }
-
-    if(4 + len > conn->incoming.size()) return false;
-
-    const uint8_t* request = &conn->incoming[4];
-    LOG_INFO("Client: [len:%d data:%.*s\n]", len, len < 100 ? len : 100, request);
-    
-    std::vector<std::string> cmd;
-    if(parse_req(request, len, cmd) < 0){
-        msg("bad request");
-        return false;
-    }
-
-    do_request(cmd, conn->outgoing);
-
-    buf_consume(conn->incoming, 4 + len);
-
-    return true;
-}
 
 
 static void handle_write(Conn* conn){
@@ -217,7 +228,7 @@ static void handle_read(Conn* conn){
 
     if(rv < 0){
         msg_errno("read()");
-        conn->want_read = false;
+        conn->want_close = true;
         return;
     }
 

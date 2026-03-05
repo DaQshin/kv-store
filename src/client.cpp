@@ -27,7 +27,7 @@ static void die(const char* msg){
 static int32_t read_full(int fd, uint8_t* read_buffer, size_t n){
     while(n > 0){
         ssize_t rv = read(fd, read_buffer, n);
-        LOG_DEBUG("Bytes read: %d", rv);
+        LOG_DEBUG("Bytes read: %zd", rv);
         if(rv <= 0){
             return -1;
         }
@@ -43,7 +43,7 @@ static int32_t read_full(int fd, uint8_t* read_buffer, size_t n){
 static int32_t write_all(int fd, const uint8_t* write_buffer, size_t n){
     while(n > 0){
         ssize_t rv = write(fd, write_buffer, n);
-        LOG_DEBUG("bytes written: %d", rv);
+        LOG_DEBUG("bytes written: %zd", rv);
         if(rv <= 0){
             return -1;
         }
@@ -53,14 +53,6 @@ static int32_t write_all(int fd, const uint8_t* write_buffer, size_t n){
     }
 
     return 0;
-}
-
-static void buf_append(std::vector<uint8_t> &buf, const uint8_t* data, size_t len){
-    buf.insert(buf.end(), data, data + len);
-}
-
-static void buf_consume(std::vector<uint8_t> &buf, size_t n){
-    buf.erase(buf.begin(), buf.begin() + n);
 }
 
 static int send_req(int fd, std::vector<std::string>& cmd){
@@ -73,7 +65,9 @@ static int send_req(int fd, std::vector<std::string>& cmd){
 
     uint8_t wbuf[4 + k_max_msg];
     memcpy(&wbuf[0], &len, 4);
-    uint32_t cur = 4;
+    uint32_t nstr = cmd.size();
+    memcpy(&wbuf[4], &nstr, 4);
+    uint32_t cur = 8;
     for(const std::string& s: cmd){
         uint32_t n = (uint32_t)s.size();
         memcpy(&wbuf[cur], &n, 4);
@@ -114,9 +108,15 @@ static int32_t read_res(int fd){
         msg("bad response");
         return -1;
     }
-
     memcpy(&status_code, &rbuf[4], 4);
-    LOG_INFO("server says: [%u] %.*s\n", status_code, len - 4, &rbuf[8]);
+
+    err = read_full(fd, &rbuf[8], len - 4);
+    if(err){
+        msg("read()");
+        return -1;
+    }
+
+    LOG_INFO("server says: [%u]  %.*s\n", status_code, len - 4, &rbuf[8]);
     return 0;
 }
 
@@ -130,18 +130,39 @@ int main(int argc, char** argv){
     sockaddr_in client_addr;
     client_addr.sin_family = AF_INET;
     client_addr.sin_port = htons(PORT);
-    client_addr.sin_addr.s_addr = ntohl(INADDR_LOOPBACK);
+    client_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
     if(connect(fd, (sockaddr*)& client_addr, sizeof(client_addr)) < 0){
         die("connect()");
     }
 
-    std::vector<std::string> cmd;
-    for(int i = 0; i < argc; ++i){
-        cmd.push_back(argv[i]);
+    
+    std::vector<std::string> commands;
+    for(int i = 1; i < argc; i++){
+        if(i + 1 >= argc){
+            msg("Invalid Command");
+            exit(1);
+        }
+        else if(std::string(argv[i]) == "GET"){
+            commands.push_back("GET");
+            commands.push_back(argv[++i]);
+        }
+        else if(std::string(argv[i]) == "SET"){
+            commands.push_back("SET");
+            commands.push_back(argv[++i]);
+            if(i + 1 >= argc){
+                msg("Not Enough Values.");
+                exit(1);
+            }
+            commands.push_back(argv[++i]);
+        }
+        else if(std::string(argv[i]) == "DEL"){
+            commands.push_back("DEL");
+            commands.push_back(argv[++i]);
+        }
     }
 
-    int32_t err = send_req(fd, cmd);
+    int32_t err = send_req(fd, commands);
     if(err) goto L_DONE;
 
     err = read_res(fd);
