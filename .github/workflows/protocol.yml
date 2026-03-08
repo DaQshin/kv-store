@@ -9,7 +9,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Compile test
-        run: g++ ./test/protocol/parse.cpp -o parse_test
+        run: g++ ./tests/protocol/parse.cpp -o parse_test
 
       - name: Run test
         run: ./parse_test
