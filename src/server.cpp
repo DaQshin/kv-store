@@ -298,6 +298,7 @@ int main(){
     }
 
     epoll_event events[MAX_EVENTS];
+    std::vector<Conn*> fd2conn;
 
     while(true){
         int n = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
@@ -308,14 +309,40 @@ int main(){
         for(int i = 0; i < n; i++){
             int fd = events[i].data.fd;
             if(fd == server_fd){
-                Conn* conn = handle_accept(fd);
+                Conn* conn;
+                if(!(conn = handle_accept(fd))){
+                    msg("connection failed.");
+                    continue;
+                }
 
                 epoll_event cev{};
                 cev.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLET;
                 cev.data.fd = conn->fd;
+                if(fd2conn.size() <= (size_t)conn->fd){
+                    fd2conn.resize(conn->fd + 1);
+                }
+                fd2conn[conn->fd] = conn;
                 if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, conn->fd, &cev) < 0){
                     msg("epoll_ctl()");
                     continue;
+                }
+            }
+            else{
+                int e = events[i].events;
+
+                if((e & (EPOLLERR | EPOLLHUP)) || fd2conn[fd]->want_close){
+                    Conn* conn = fd2conn[fd];
+                    close(conn->fd);
+                    delete conn;
+                    fd2conn[fd] = nullptr;
+                }
+
+                if(e & EPOLLIN){
+                    handle_read(fd2conn[fd]);
+                }
+
+                if(e & EPOLLOUT){
+                    handle_write(fd2conn[fd]);
                 }
             }
         }
