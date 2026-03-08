@@ -8,5 +8,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run protocol tests
-        run: ./tests/protocol/e2e_test
+      - name: Compile test
+        run: g++ ./test/protocol/parse.cpp -o parse_test
+
+      - name: Run test
+        run: ./parse_test
