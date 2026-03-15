@@ -14,6 +14,7 @@
 #include <vector>
 #include <map>
 #include "../include/log.h"
+#include "hashtable.h"
 
 #define PORT 5000
 #define MAX_EVENTS 64

@@ -15,8 +15,8 @@ struct HTable {
 };
 
 struct HMap {
-    HTable ht0;
-    HTable ht1;
+    HTable older;
+    HTable newer;
     size_t migrate_pos = 0;
 };
 
