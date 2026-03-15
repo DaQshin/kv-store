@@ -150,5 +150,4 @@ g++ -std=c++17 -O2 -o dkvs server.cpp -lpthread
 - [ ] Persistence via append-only log / WAL
 - [ ] Snapshotting for crash recovery
 - [ ] `KEYS` / `EXISTS` / `TTL` commands
-- [ ] Replace `std::map` with hash map
 - [ ] Ring buffer for `incoming`/`outgoing`
