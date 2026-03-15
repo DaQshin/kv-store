@@ -69,6 +69,16 @@ enum {
 
 static std::map<std::string, std::string> global_ds;
 
+static struct {
+    Hmap db;
+} g_data;
+
+struct Entry {
+    struct HNode node;
+    std::string key;
+    std::string value;
+}
+
 static void buf_append(std::vector<uint8_t> &buf, const uint8_t* data, size_t len){
     buf.insert(buf.end(), data, data + len); // O(n) everytime!!
 }

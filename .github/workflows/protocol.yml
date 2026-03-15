@@ -1,6 +1,13 @@
 name: Protocol Parse Test
 
-on: [push, pull_request]
+on:
+  push:
+    paths-ignore:
+      - "README.MD"
+      - ".gitignore"
+      - "Makefile"
+      - "docs/**"
+    branches: [main]
 
 jobs:
   test:
