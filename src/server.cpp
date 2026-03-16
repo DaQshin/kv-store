@@ -19,6 +19,9 @@
 #define PORT 5000
 #define MAX_EVENTS 64
 
+#define container_of(ptr, T, member) \
+    ((T*)(char*)ptr - offsetof(T, member))
+
 static void msg(const char* msg){
     fprintf(stderr, "%s\n", msg);
 }
@@ -67,17 +70,7 @@ enum {
     RES_NX = 2
 };
 
-static std::map<std::string, std::string> global_ds;
-
-static struct {
-    Hmap db;
-} g_data;
-
-struct Entry {
-    struct HNode node;
-    std::string key;
-    std::string value;
-}
+// static std::map<std::string, std::string> global_ds;
 
 static void buf_append(std::vector<uint8_t> &buf, const uint8_t* data, size_t len){
     buf.insert(buf.end(), data, data + len); // O(n) everytime!!
@@ -87,35 +80,72 @@ static void buf_consume(std::vector<uint8_t> &buf, size_t n){
     buf.erase(buf.begin(), buf.begin() + n); // O(n) everytime!! 
 }
 
-static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
-    uint32_t status = RES_OK;
-    std::string val = "[NO REPLY]";
-    if(cmd.size() == 2 && cmd[0] == "GET"){
-        auto it = global_ds.find(cmd[1]);
-        if(it == global_ds.end()){
-            status = RES_NX;
-            val = "Value Not Found.";
-        }
-        else val = it->second;
-    }
-    else if(cmd.size() == 3 && cmd[0] == "SET"){
-        global_ds[cmd[1]] = std::move(cmd[2]);
-        val = "Operation successful.";
-    }
-    else if(cmd.size() == 2 && cmd[0] == "DEL"){
-        global_ds.erase(cmd[1]);
-        val = "Operation successful.";
-    }
-    else{
-        status = RES_ERR;
-        val = "Operation falied.";
-    }
-
-    uint32_t res_len = 4 + (uint32_t)(val.end() - val.begin());
+static void make_response(std::string& val, uint32_t status, std::vector<uint8_t>& out){
+    uint32_t res_len = 4 + (uint32_t)val.size();
     buf_append(out, (const uint8_t*)& res_len, 4);
     buf_append(out, (const uint8_t*)& status, 4);
     buf_append(out, (const uint8_t*)val.data(), (size_t)(val.end() - val.begin()));
 }
+
+static uint32_t str_hash(const uint8_t* data, size_t len){
+    uint32_t h = 0x811C9DC5;
+    for(size_t i = 0; i < len; i++){
+        h = (h + data[i]) * 0x01000193;
+    }
+
+    return h;
+}
+
+
+static struct{
+    HMap db;
+} g_data;
+
+struct Entry {
+    struct HNode node;
+    std::string key;
+    std::string value;
+};
+
+static bool entry_eq(HNode* lhs, HNode* rhs){
+    struct Entry* le = container_of(lhs, struct Entry, node);
+    struct Entry* re = container_of(rhs, struct Entry, node);
+    return le->key == re->key;
+}
+
+static void get(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
+    Entry key;
+    uint32_t status = RES_OK;
+    key.key.swap(cmd[1]);
+    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
+    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    std::string val = "";
+    if(!node){
+       status = RES_NX;
+    }
+    else{
+        val = container_of(node, Entry, node)->value;
+    }
+
+    assert(val.size() <= k_max_msg);
+    make_response(val, status, out);
+}
+
+// static void set(std::vector<std::string>& cmd, std::vector<uint8_t>& out);
+// static void del(std::vector<std::string>& cmd, std::vector<uint8_t>& out);
+
+static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
+    if(cmd.size() == 2 && cmd[0] == "GET"){
+        get(cmd, out);
+    }
+    // else if(cmd.size() == 3 && cmd[0] == "SET"){
+    //     set(cmd, out);
+    // }
+    // else if(cmd.size() == 2 && cmd[0] == "DEL"){
+    //     del(cmd, out);
+    // }
+}
+
 
 static bool read_u32(const uint8_t*& cur, const uint8_t*& end, uint32_t* out){
     if(cur + 4 > end) return false;
