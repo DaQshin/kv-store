@@ -1,4 +1,4 @@
-# DKVS — Single-Node Key-Value Store
+# Key-Value Store
 
 A single-node, in-memory key-value store written in C++ with a non-blocking TCP server built on `epoll`. Supports `GET`, `SET`, and `DEL` over a lightweight length-prefixed binary protocol.
 

@@ -80,7 +80,7 @@ static void buf_consume(std::vector<uint8_t> &buf, size_t n){
     buf.erase(buf.begin(), buf.begin() + n); // O(n) everytime!! 
 }
 
-static void make_response(std::string& val, uint32_t status, std::vector<uint8_t>& out){
+static void make_response(const std::string& val, uint32_t status, std::vector<uint8_t>& out){
     uint32_t res_len = 4 + (uint32_t)val.size();
     buf_append(out, (const uint8_t*)& res_len, 4);
     buf_append(out, (const uint8_t*)& status, 4);
@@ -131,8 +131,29 @@ static void get(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
     make_response(val, status, out);
 }
 
-// static void set(std::vector<std::string>& cmd, std::vector<uint8_t>& out);
-// static void del(std::vector<std::string>& cmd, std::vector<uint8_t>& out);
+static void set(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
+    Entry key;
+    key.key.swap(cmd[1]);
+    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
+    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if(node){
+        container_of(node, Entry, node)->value.swap(cmd[2]);
+    }
+    else{
+        Entry* ent = new Entry();
+        ent->key.swap(key.key);
+        ent->value.swap(cmd[2]);
+        ent->node.hash = key.node.hash;
+        hm_insert(&g_data.db, &ent->node)
+    }
+}
+
+static void del(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
+    Entry key;
+    key.key.swap(cmd[1]);
+    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
+    HNode* node = hm_delete(&g_data.db, &key.node, &entry_eq);
+}
 
 static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
     if(cmd.size() == 2 && cmd[0] == "GET"){
