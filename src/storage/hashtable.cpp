@@ -33,7 +33,7 @@ static HNode** h_lookup(HTable* htable, HNode* node, bool (*eq)(HNode*, HNode*))
 
 static HNode* h_detach(HTable* htable, HNode** from){
     HNode* node = *from;
-    **from = &node->next;
+    from = &node->next;
     htable->size--;
     return node;
 }
@@ -56,17 +56,17 @@ HNode* hm_lookup(HMap* hmap, HNode* node, bool (*eq)(HNode*, HNode*)){
 void hm_migrate_keys(HMap* hmap){
     size_t nwork = 0;
     while(nwork < k_max_rehashing && hmap->older.size > 0){
-        HNode** from = &hmap->older.table[hmap->newer.migrate_pos];
+        HNode** from = &hmap->older.table[hmap->migrate_pos];
         if(!*from){
-            hmap->newer.migrate_pos++;
+            hmap->migrate_pos++;
             continue;
         }
-        h_insert(&hmap->newer, h_detach(&hmap->older, *from));
+        h_insert(&hmap->newer, h_detach(&hmap->older, from));
         nwork++;
     }
 
     if(hmap->older.size == 0 && hmap->older.table){
-        free(&hmap->older.table);
+        free(hmap->older.table);
         hmap->older = HTable{};
     }
 }
@@ -86,9 +86,9 @@ void hm_insert(HMap* hmap, HNode* node){
 }
 
 void hm_clear(HMap* hmap){
-    free(&hmap->older.table);
-    free(&hmap->newer.table);
-    hmap = HMap{};
+    free(hmap->older.table);
+    free(hmap->newer.table);
+    *hmap = HMap{};
 }
 
 size_t hm_size(HMap* hmap){

@@ -9,7 +9,6 @@
 #include <assert.h>
 #include <vector>
 #include "../include/log.h"
-
 #define PORT 5000
 
 const size_t k_max_msg = 4096;
