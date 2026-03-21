@@ -11,15 +11,12 @@ $(BUILD)/client: src/client.cpp logging/log.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-$(BUILD)/server:
-	src/server.cpp
-	src/storage/hashtable.cpp
-	logging/log.cpp
+$(BUILD)/server: src/server.cpp src/storage/hashtable.cpp logging/log.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 run_server: all 
-			./$(BUILD)/server
+			./$(BUILD)/server --port $(PORT)
 
 run_client: all 
 			./$(BUILD)/client $(CMD)
