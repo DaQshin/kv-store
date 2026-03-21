@@ -13,7 +13,7 @@
 #include <netinet/ip.h>
 #include <vector>
 #include <map>
-#include "../include/log.h"
+#include "log.h"
 #include "hashtable.h"
 
 #define PORT 5000
@@ -96,75 +96,45 @@ static uint32_t str_hash(const uint8_t* data, size_t len){
     return h;
 }
 
-
-static struct{
+static struct {
     HMap db;
 } g_data;
 
-struct Entry {
+struct Entry{
     struct HNode node;
     std::string key;
     std::string value;
 };
 
 static bool entry_eq(HNode* lhs, HNode* rhs){
-    struct Entry* le = container_of(lhs, struct Entry, node);
-    struct Entry* re = container_of(rhs, struct Entry, node);
-    return le->key == re->key;
+    struct Entry* l = container_of(lhs, struct Entry, node);
+    struct Entry* r = container_of(rhs, struct Entry, node);
+    return l->key == r->key;
 }
 
 static void get(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
-    Entry key;
+    struct Entry key;
     uint32_t status = RES_OK;
     key.key.swap(cmd[1]);
     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
     HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
     std::string val = "";
-    if(!node){
-       status = RES_NX;
+    if(node){
+        val = container_of(node, struct Entry, node)->value;
     }
-    else{
-        val = container_of(node, Entry, node)->value;
+    else {
+        status = RES_NX;
     }
 
     assert(val.size() <= k_max_msg);
     make_response(val, status, out);
-}
 
-static void set(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
-    Entry key;
-    key.key.swap(cmd[1]);
-    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
-    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
-    if(node){
-        container_of(node, Entry, node)->value.swap(cmd[2]);
-    }
-    else{
-        Entry* ent = new Entry();
-        ent->key.swap(key.key);
-        ent->value.swap(cmd[2]);
-        ent->node.hash = key.node.hash;
-        hm_insert(&g_data.db, &ent->node)
-    }
-}
-
-static void del(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
-    Entry key;
-    key.key.swap(cmd[1]);
-    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
-    HNode* node = hm_delete(&g_data.db, &key.node, &entry_eq);
 }
 
 static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
     if(cmd.size() == 2 && cmd[0] == "GET"){
         get(cmd, out);
     }
-    // else if(cmd.size() == 3 && cmd[0] == "SET"){
-    //     set(cmd, out);
-    // }
-    // else if(cmd.size() == 2 && cmd[0] == "DEL"){
-    //     del(cmd, out);
-    // }
 }
 
 

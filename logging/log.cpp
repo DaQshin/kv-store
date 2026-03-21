@@ -1,4 +1,4 @@
-#include "../../include/log.h"
+#include "../include/log.h"
 
 static const char* level_str[] = {
     "DEBUG", "INFO", "WARN", "ERROR"

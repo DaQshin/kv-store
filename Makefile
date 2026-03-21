@@ -7,11 +7,14 @@ BUILD := build
 
 all: $(BUILD)/client $(BUILD)/server
 
-$(BUILD)/client: src/client.cpp src/logging/log.cpp
+$(BUILD)/client: src/client.cpp logging/log.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
-$(BUILD)/server: src/server.cpp src/logging/log.cpp
+$(BUILD)/server:
+	src/server.cpp
+	src/storage/hashtable.cpp
+	logging/log.cpp
 	mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
@@ -19,7 +22,7 @@ run_server: all
 			./$(BUILD)/server
 
 run_client: all 
-			./$(BUILD)/client
+			./$(BUILD)/client $(CMD)
 
 clean:
 	rm -rf $(BUILD)
