@@ -20,7 +20,7 @@
 #define MAX_EVENTS 64
 
 #define container_of(ptr, T, member) \
-    ((T*)(char*)ptr - offsetof(T, member))
+    ((T*)(char*)(ptr) - offsetof(T, member))
 
 static void msg(const char* msg){
     fprintf(stderr, "%s\n", msg);
@@ -70,7 +70,6 @@ enum {
     RES_NX = 2
 };
 
-// static std::map<std::string, std::string> global_ds;
 
 static void buf_append(std::vector<uint8_t> &buf, const uint8_t* data, size_t len){
     buf.insert(buf.end(), data, data + len); // O(n) everytime!!
@@ -84,7 +83,7 @@ static void make_response(const std::string& val, uint32_t status, std::vector<u
     uint32_t res_len = 4 + (uint32_t)val.size();
     buf_append(out, (const uint8_t*)& res_len, 4);
     buf_append(out, (const uint8_t*)& status, 4);
-    buf_append(out, (const uint8_t*)val.data(), (size_t)(val.end() - val.begin()));
+    buf_append(out, (const uint8_t*)val.data(), (size_t)val.size());
 }
 
 static uint32_t str_hash(const uint8_t* data, size_t len){
@@ -195,6 +194,7 @@ static bool try_one_request(Conn* conn){
     std::vector<std::string> cmd;
     if(parse_req(request, total_len, cmd) < 0){
         msg("bad request");
+        conn->want_close = true;
         return false;
     }
 
@@ -235,7 +235,7 @@ static Conn* handle_accept(int fd){
 
 
 static void handle_write(Conn* conn){
-    // assert(conn->outgoing.size() > 0);
+    assert(conn->outgoing.size() > 0);
     ssize_t rv = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
     if(rv < 0 && errno == EAGAIN){
         return;
@@ -348,7 +348,7 @@ int main(){
                 }
 
                 epoll_event cev{};
-                cev.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLET;
+                cev.events = EPOLLIN | EPOLLOUT | EPOLLERR;
                 cev.data.fd = conn->fd;
                 if(fd2conn.size() <= (size_t)conn->fd){
                     fd2conn.resize(conn->fd + 1);
@@ -362,19 +362,19 @@ int main(){
             else{
                 int e = events[i].events;
 
-                if((e & (EPOLLERR | EPOLLHUP)) || fd2conn[fd]->want_close){
-                    Conn* conn = fd2conn[fd];
-                    close(conn->fd);
-                    delete conn;
-                    fd2conn[fd] = nullptr;
-                }
-
                 if(e & EPOLLIN){
                     handle_read(fd2conn[fd]);
                 }
 
                 if(e & EPOLLOUT){
                     handle_write(fd2conn[fd]);
+                }
+
+                if((e & (EPOLLERR | EPOLLHUP)) || fd2conn[fd]->want_close){
+                    Conn* conn = fd2conn[fd];
+                    close(conn->fd);
+                    delete conn;
+                    fd2conn[fd] = nullptr;
                 }
             }
         }
