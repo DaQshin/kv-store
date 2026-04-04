@@ -137,11 +137,7 @@ int main(int argc, char** argv){
 
     std::vector<std::string> commands;
     for(int i = 1; i < argc; i++){
-        if(i + 1 >= argc){
-            msg("Invalid Command");
-            exit(1);
-        }
-        else if(std::string(argv[i]) == "GET"){
+        if(std::string(argv[i]) == "GET"){
             commands.push_back("GET");
             commands.push_back(argv[++i]);
         }
@@ -157,6 +153,9 @@ int main(int argc, char** argv){
         else if(std::string(argv[i]) == "DEL"){
             commands.push_back("DEL");
             commands.push_back(argv[++i]);
+        }
+        else if(std::string(argv[i]) == "FLUSH"){
+            commands.push_back("FLUSH");
         }
     }
 

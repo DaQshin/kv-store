@@ -72,11 +72,11 @@ enum {
 
 
 static void buf_append(std::vector<uint8_t> &buf, const uint8_t* data, size_t len){
-    buf.insert(buf.end(), data, data + len); // O(n) everytime!!
+    buf.insert(buf.end(), data, data + len); // Buffer()
 }
 
 static void buf_consume(std::vector<uint8_t> &buf, size_t n){
-    buf.erase(buf.begin(), buf.begin() + n); // O(n) everytime!! 
+    buf.erase(buf.begin(), buf.begin() + n); // Buffer() 
 }
 
 static void make_response(const std::string& val, uint32_t status, std::vector<uint8_t>& out){
@@ -130,9 +130,107 @@ static void get(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
 
 }
 
+static void set(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
+    struct Entry key;
+    uint32_t status = RES_OK;
+    key.key.swap(cmd[1]);
+    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
+    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if(node){
+        container_of(node, struct Entry, node)->value.swap(cmd[2]);
+    }
+    else{
+       struct Entry* ent = new Entry();
+       ent->key.swap(key.key);
+       ent->value.swap(cmd[2]);
+       ent->node.hash = key.node.hash;
+       hm_insert(&g_data.db, &ent->node);
+    }   
+
+    std::string response = "Operartion successful.";
+
+    make_response(response, status, out);
+}
+
+static void del(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
+    struct Entry key;
+    uint32_t status = RES_OK;
+    key.key.swap(cmd[1]);
+    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
+    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if(node){
+        delete container_of(node, struct Entry, node);
+    }
+    else status = RES_NX;
+
+    std::string response = "Operation successful.";
+
+    make_response(response, status, out);
+}
+
+static void flush(std::vector<uint8_t>& out){
+    hm_clear(&g_data.db);
+    std::string response = "Operation successful.";
+    uint32_t status = RES_OK;
+    make_response(response, status, out);
+}
+
+static void exists(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
+    struct Entry key;
+    key.key.swap(cmd[1]);
+    uint32_t status = RES_OK;
+    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
+    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    std::string exists = "0";
+    if(node){
+        exists = "1";
+    }
+
+    make_response(exists, status, out);
+}
+
 static void do_request(std::vector<std::string>& cmd, std::vector<uint8_t>& out){
+
+    LOG_INFO("db state: newer.table=%p newer.mask=%zu newer.size=%zu",
+         (void*)g_data.db.newer.table,
+         g_data.db.newer.mask,
+         g_data.db.newer.size);
+    
     if(cmd.size() == 2 && cmd[0] == "GET"){
+        LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
+         cmd.size(),
+         cmd[0].c_str(),
+         cmd[1].c_str());
         get(cmd, out);
+    }
+
+    if(cmd.size() == 2 && cmd[0] == "EXISTS"){
+        LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
+         cmd.size(),
+         cmd[0].c_str(),
+         cmd[1].c_str());
+        exists(cmd, out);
+    }
+
+    if(cmd.size() == 3 && cmd[0] == "SET"){
+        LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s cmd[2]=%s",
+         cmd.size(),
+         cmd[0].c_str(),
+         cmd[1].c_str(),
+        cmd[2].c_str());
+        set(cmd, out);
+    }
+
+    if(cmd.size() == 2 && cmd[0] == "DEL"){
+        LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
+         cmd.size(),
+         cmd[0].c_str(),
+        cmd[1].c_str());
+        del(cmd, out);
+    }
+
+    if(cmd.size() == 1 && cmd[0] == "FLUSH"){
+        flush(out);
     }
 }
 
@@ -172,6 +270,14 @@ static int32_t parse_req(const uint8_t*& data, size_t size, std::vector<std::str
     return 0;
 }
 
+void log_payload(const uint8_t* data, size_t len) {
+    printf("payload (%zu bytes): ", len);
+    for (size_t i = 0; i < len; i++) {
+        printf("%02x ", data[i]);
+    }
+    printf("\n");
+}
+
 static bool try_one_request(Conn* conn){
     if(conn->incoming.size() < 4) return false;
 
@@ -186,10 +292,8 @@ static bool try_one_request(Conn* conn){
     if(4 + total_len > conn->incoming.size()) return false;
 
     const uint8_t* request = &conn->incoming[4];
-    LOG_INFO("Client: [total_len:%u data:%.*s]\n",
-         total_len,
-         (int)(total_len < 100 ? total_len : 100),
-         (char*)request);
+
+    log_payload(request, total_len);
     
     std::vector<std::string> cmd;
     if(parse_req(request, total_len, cmd) < 0){
@@ -197,6 +301,12 @@ static bool try_one_request(Conn* conn){
         conn->want_close = true;
         return false;
     }
+
+    printf("parsed cmd: ");
+    for (auto& s : cmd) {
+        printf("[%s] ", s.c_str());
+    }
+    printf("\n");
 
     do_request(cmd, conn->outgoing);
 
@@ -232,10 +342,37 @@ static Conn* handle_accept(int fd){
 
 }
 
+static void enable_write(int epfd, Conn* conn){
+    if(!conn->want_write && conn->outgoing.size() > 0){
+        epoll_event ev{};
+        ev.events = EPOLLIN | EPOLLOUT | EPOLLERR | EPOLLHUP;
+        ev.data.fd = conn->fd;
 
+        if(epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev) < 0){
+            die("epoll_ctl MOD");
+        }
 
-static void handle_write(Conn* conn){
+        conn->want_write = true;
+    }
+
+    else if(conn->want_write && conn->outgoing.size() == 0){
+        epoll_event ev{};
+        ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
+        ev.data.fd = conn->fd;
+
+        if(epoll_ctl(epfd, EPOLL_CTL_MOD, conn->fd, &ev) < 0){
+            die("epoll_ctl MOD");
+        }
+
+        conn->want_read = true;
+        conn->want_write = false;
+
+    }
+}
+
+static void handle_write(Conn* conn, int epfd){
     assert(conn->outgoing.size() > 0);
+    
     ssize_t rv = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
     if(rv < 0 && errno == EAGAIN){
         return;
@@ -248,14 +385,11 @@ static void handle_write(Conn* conn){
     }
 
     buf_consume(conn->outgoing, (size_t)rv);
-    if(conn->outgoing.size() == 0){
-        conn->want_read = true;
-        conn->want_write = false;
-    }
+    enable_write(epfd, conn);
 
 }
 
-static void handle_read(Conn* conn){
+static void handle_read(Conn* conn, int epfd){
     uint8_t buf[64 * 1024];
     ssize_t rv = read(conn->fd, buf, sizeof(buf));
     if(rv < 0 && errno == EAGAIN) return;
@@ -282,9 +416,7 @@ static void handle_read(Conn* conn){
     while(try_one_request(conn)){}
 
     if(conn->outgoing.size() > 0){
-        conn->want_read = false;
-        conn->want_write = true;
-        return handle_write(conn);
+        enable_write(epfd, conn);
     }
 
 }
@@ -313,6 +445,8 @@ int main(){
         die("listen()");
     }
 
+    fd_set_nb(server_fd);
+
     LOG_INFO("server running on port %d", PORT);
 
     int epoll_fd = epoll_create1(0);
@@ -322,7 +456,7 @@ int main(){
     }
 
     epoll_event sev{};
-    sev.events = EPOLLIN;
+    sev.events = EPOLLIN | EPOLLERR;
     sev.data.fd = server_fd;
 
     if(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &sev) < 0){
@@ -348,7 +482,7 @@ int main(){
                 }
 
                 epoll_event cev{};
-                cev.events = EPOLLIN | EPOLLOUT | EPOLLERR;
+                cev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
                 cev.data.fd = conn->fd;
                 if(fd2conn.size() <= (size_t)conn->fd){
                     fd2conn.resize(conn->fd + 1);
@@ -363,18 +497,19 @@ int main(){
                 int e = events[i].events;
 
                 if(e & EPOLLIN){
-                    handle_read(fd2conn[fd]);
+                    handle_read(fd2conn[fd], epoll_fd);
                 }
 
                 if(e & EPOLLOUT){
-                    handle_write(fd2conn[fd]);
+                    handle_write(fd2conn[fd], epoll_fd);
                 }
 
                 if((e & (EPOLLERR | EPOLLHUP)) || fd2conn[fd]->want_close){
                     Conn* conn = fd2conn[fd];
+                    if(epoll_ctl(epoll_fd, EPOLL_CTL_DEL, conn->fd, nullptr) < 0) die("epoll_ctl");
                     close(conn->fd);
-                    delete conn;
                     fd2conn[fd] = nullptr;
+                    delete conn;
                 }
             }
         }

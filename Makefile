@@ -16,7 +16,7 @@ $(BUILD)/server: src/server.cpp src/storage/hashtable.cpp logging/log.cpp
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 run_server: all 
-			./$(BUILD)/server --port $(PORT)
+			./$(BUILD)/server
 
 run_client: all 
 			./$(BUILD)/client $(CMD)
