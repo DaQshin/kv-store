@@ -1,3 +1,3 @@
 # Key Value Store
 
-- (Overview)[/docs/overview.md]
+- [Overview](/docs/overview.md)
