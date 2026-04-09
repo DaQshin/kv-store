@@ -79,7 +79,7 @@ enum {
     ERR_TOO_BIG = 2
 };
 
-enum Types {
+enum {
     TAG_NIL = 0,
     TAG_ERR = 1,
     TAG_INT = 2,
@@ -87,8 +87,6 @@ enum Types {
     TAG_DOUBLE = 4,
     TAG_ARRAY = 5,
 };
-
-
 
 static void buf_append(Buffer &buf, const uint8_t* data, size_t len){
     buf.insert(buf.end(), data, data + len); // Buffer()
@@ -106,9 +104,10 @@ static void make_response(const std::string& val, uint32_t status, Buffer& out){
 }
 
 static uint32_t str_hash(const uint8_t* data, size_t len){
+    // FNV-1a
     uint32_t h = 0x811C9DC5;
     for(size_t i = 0; i < len; i++){
-        h = (h + data[i]) * 0x01000193;
+        h = (h ^ data[i]) * 0x01000193;
     }
 
     return h;
@@ -221,7 +220,7 @@ static void set(std::vector<std::string>& cmd, Buffer& out){
        hm_insert(&g_data.db, &ent->node);
     }   
 
-    std::string response = "Operartion successful.";
+    std::string response = "Operation successful.";
 
     make_response(response, status, out);
 }
@@ -479,50 +478,50 @@ static void enable_write(int epfd, Conn* conn){
 static void handle_write(Conn* conn, int epfd){
     assert(conn->outgoing.size() > 0);
     
-    ssize_t rv = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
-    if(rv < 0 && errno == EAGAIN){
-        return;
-    }
+    while(conn->outgoing.size() > 0){
+        ssize_t rv = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
+        if(rv > 0) buf_consume(conn->outgoing, (size_t)rv);
 
-    if(rv < 0){
-        msg_errno("write()");
-        conn->want_close = true;
-        return;
-    }
+        else {
+            if(errno == EAGAIN || errno == EWOULDBLOCK) break;
 
-    buf_consume(conn->outgoing, (size_t)rv);
+            conn->want_close = true;
+            return;
+        }
+
+    }
     enable_write(epfd, conn);
 
 }
 
 static void handle_read(Conn* conn, int epfd){
     uint8_t buf[64 * 1024];
-    ssize_t rv = read(conn->fd, buf, sizeof(buf));
-    if(rv < 0 && errno == EAGAIN) return;
+    while(true){
+        ssize_t rv = read(conn->fd, buf, sizeof(buf));
 
-    if(rv < 0){
-        msg_errno("read()");
-        conn->want_close = true;
-        return;
-    }
+        if(rv > 0){
+            buf_append(conn->incoming, buf, (size_t)rv);
 
-    if(rv == 0){
-        if(conn->incoming.size() == 0){
-            msg("client closed");
+            while(!conn->want_close && try_one_request(conn)){}
         }
-        else{
-            msg("unexected EOF");
+
+        else if(rv == 0){
+            if(conn->incoming.size() == 0) msg("client closed");
+            else msg("Unexpected EOF");
+            conn->want_close = true;
+            return;
         }
-        conn->want_close = true;
-        return;
+
+        else {
+            if(errno == EAGAIN || errno == EWOULDBLOCK) break;
+            conn->want_close = true;
+            return;
+        }
+
     }
-
-    buf_append(conn->incoming, buf, (size_t)rv);
-
-    while(try_one_request(conn)){}
 
     if(conn->outgoing.size() > 0){
-        enable_write(epfd, conn);
+            enable_write(epfd, conn);
     }
 
 }
@@ -588,7 +587,7 @@ int main(){
                 }
 
                 epoll_event cev{};
-                cev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
+                cev.events = EPOLLIN | EPOLLET | EPOLLERR | EPOLLHUP;
                 cev.data.fd = conn->fd;
                 if(fd2conn.size() <= (size_t)conn->fd){
                     fd2conn.resize(conn->fd + 1);
