@@ -225,27 +225,25 @@ static void set(std::vector<std::string>& cmd, Buffer& out){
     out_str(out, (const char*)response.data(), response.size());
 }
 
-// static void del(std::vector<std::string>& cmd, Buffer& out){
-//     std::string response = "";
-//     if(!g_data.db.newer.table) {
-//         response = "Empty DB.";
-//         status = RES_ERR;
-//         make_response(response, status, out);
-//         return;
-//     }
-//     struct Entry key;
-//     key.key.swap(cmd[1]);
-//     key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
-//     HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
-//     if(node){
-//         delete container_of(node, struct Entry, node);
-//     }
-//     else status = RES_NX;
+static void del(std::vector<std::string>& cmd, Buffer& out){
+    std::string response = "Operation successful.";
+    if(!g_data.db.newer.table) {
+        response = "Empty DB.";
+        out_str(out, (const char*)response.data(), response.size());
+        return;
+    }
+    struct Entry key;
+    key.key.swap(cmd[1]);
+    key.node.hash = str_hash((uint8_t*)key.key.data(), key.key.size());
+    HNode* node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if(node){
+        delete container_of(node, struct Entry, node);
+    }
+    else response = "Value Not Found.";
 
-//     response = "Operation successful.";
+    out_str(out, (const char*)response.data(), response.size());
 
-//     make_response(response, status, out);
-// }
+}
 
 static void flush(Buffer& out){
     hm_clear(&g_data.db);
@@ -298,13 +296,13 @@ static void do_request(std::vector<std::string>& cmd, Buffer& out){
         exists(cmd, out);
     }
 
-    // else if(cmd.size() == 2 && cmd[0] == "DEL"){
-    //     LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
-    //      cmd.size(),
-    //      cmd[0].c_str(),
-    //     cmd[1].c_str());
-    //     del(cmd, out);
-    // }
+    else if(cmd.size() == 2 && cmd[0] == "DEL"){
+        LOG_INFO("cmd.size=%zu cmd[0]=%s cmd[1]=%s",
+         cmd.size(),
+         cmd[0].c_str(),
+        cmd[1].c_str());
+        del(cmd, out);
+    }
 
     else if(cmd.size() == 1 && cmd[0] == "FLUSH"){
         flush(out);
@@ -320,7 +318,6 @@ static bool read_u32(const uint8_t*& cur, const uint8_t*& end, uint32_t* out){
     if(cur + 4 > end) return false;
 
     memcpy(out, cur, 4);
-    *out = ntohl(*out);
     cur += 4;
     return true;
 }
